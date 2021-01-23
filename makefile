@@ -1,7 +1,7 @@
 all: get build run
 
 get:
-	git pull origin master
+	git pull origin main
 
 build:
 	mpicc hello_world_mpi.c -o main
