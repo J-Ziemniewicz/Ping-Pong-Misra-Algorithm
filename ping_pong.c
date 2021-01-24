@@ -9,16 +9,21 @@
 #define PONG_MODE 2
 #define DEBUG 1
 #define MSG_SIZE 1
-#define STARTING_HOST 0
-#define PING_DELAY 500
-#define PONG_DELAY 800
 
+// configurable_values
+#define STARTING_HOST 0
+#define PING_DELAY 50000
+#define PONG_DELAY 1000000
+
+// Debug mode default disabled
 int debug = 0;
 
+// Initial ping, pong and m values
 int ping = 1;
 int pong = -1;
 int m = 0;
 
+// Host variables
 int my_id = 1;
 int nproc;
 int nextHost;
@@ -31,13 +36,14 @@ pthread_cond_t wait_conditional = PTHREAD_COND_INITIALIZER;
 
 
 
-void regenerate(int val) {
-	ping = abs(val);
-	pong = -ping;
-}
+// void regenerate(int val) {
+// 	ping = abs(val);
+// 	pong = -ping;
+// }
 
 void incarnate(int val) {
-	ping = abs(val) + 1;
+	// ping = (abs(val) + 1)%(nproc+1);
+  ping = abs(val)+1;
 	pong = -ping;
 }
 
@@ -47,14 +53,14 @@ void sendToken(int val, int type){
   
   if(type == PING_MODE){
     if(debug){
-        printf("Sending PING: %d",val);
+        printf("[Thread %d] Sending PING: %d\n",my_id, val);
     }
     usleep(PING_DELAY);
     MPI_Send(&val, MSG_SIZE, MPI_INT, nextHost, PING_MODE, MPI_COMM_WORLD);
   }
   else if(type == PONG_MODE){
     if(debug){
-        printf("Sending PONG: %d",val);
+        printf("[Thread %d] Sending PONG: %d\n",my_id, val);
     }
     usleep(PONG_DELAY);
     MPI_Send(&val, MSG_SIZE, MPI_INT, nextHost, PONG_MODE, MPI_COMM_WORLD);
@@ -64,9 +70,8 @@ void sendToken(int val, int type){
 
 void *receive_thread()
 {
-    printf("%d: Zaczynam wątek odbierający\n", my_id);
+    // printf("%d: Zaczynam wątek odbierający\n", my_id);
     
-   
     while (1)
     {
       int msg;
@@ -82,20 +87,26 @@ void *receive_thread()
           }
           pthread_mutex_lock(&main_mutex);
           if(m == msg){
-            regenerate(msg);
+            // instead of regenerate and than increment do incarnate (to simplyfy code)
+            incarnate(msg);
             if(debug){
-              printf("[Thread %d] PONG REGENERATE\n[Thread %d] New PONG value %d",my_id,my_id,pong);
+              printf("[Thread %d] PONG REGENERATE\n[Thread %d] New PONG value %d\n",my_id,my_id,pong);
             }
             sendToken(pong,PONG_MODE);
           }
           else {
-            critical_section = 1;
+            ping = msg;
+            if(debug){
+              printf("[Thread %d] Received token for Critical section %d\n",my_id,ping);
+            }
           }
+          critical_section = 1;
           pthread_mutex_unlock(&main_mutex);
+          pthread_cond_signal(&wait_conditional);
         }
         else {
           if(debug){
-            printf("[Thread %d] Old PING\n",my_id);
+            printf("[Thread %d] Old PING %d\n",my_id,msg);
           }
         }  
       }
@@ -112,20 +123,29 @@ void *receive_thread()
               printf("[Thread %d] Incarnation: %d\n",my_id,ping);
             }
             sendToken(pong,PONG_MODE);
+            pthread_mutex_unlock(&main_mutex);
           }
           else if(m == msg){
-            regenerate(msg);
+            // instead of regenerate and than increment do incarnate (to simplyfy code)
+            incarnate(msg);
             if(debug){
-              printf("[Thread %d] PING REGENERATE\n[Thread %d] New PING value %d",my_id,my_id,pong);
+              printf("[Thread %d] PING REGENERATE\n[Thread %d] New PING value %d\n",my_id,my_id,ping);
             }
-            sendToken(ping,PING_MODE);
+            critical_section = 1;
+            sendToken(pong,PONG_MODE);
+            pthread_mutex_unlock(&main_mutex);
+            pthread_cond_signal(&wait_conditional);
           }
-          pthread_mutex_unlock(&main_mutex);
-          pthread_cond_signal(&wait_conditional);
+          else{
+            pong = msg;
+            sendToken(pong,PONG_MODE);
+            pthread_mutex_unlock(&main_mutex);
+          }
+          
         }
         else {
           if(debug){
-            printf("[Thread %d] Old PONG\n",my_id);
+            printf("[Thread %d] Old PONG %d\n",my_id,msg);
           }
         }
       }
@@ -142,7 +162,7 @@ void *receive_thread()
 
 int main(int argc, char** argv) {
 
-  int run_mode;
+  int run_mode =0;
   int opt; 
       
   while ((opt = getopt(argc, argv, "dt:")) != -1) {
@@ -163,7 +183,7 @@ int main(int argc, char** argv) {
             }
             break;
         default: /* '?' */
-            fprintf(stderr, "Usage: %s [-t mode] \n",
+            fprintf(stderr, "Usage: %s [-t mode] -d \n",
                     argv[0]);
             exit(EXIT_FAILURE);
         }
@@ -173,7 +193,7 @@ int main(int argc, char** argv) {
   MPI_Init_thread(&argc, &argv, 3, &temp);
   MPI_Comm_size(MPI_COMM_WORLD, &nproc );
   MPI_Comm_rank(MPI_COMM_WORLD, &my_id );
-  printf("Sync level: %d\n", temp);
+  
   MPI_Barrier(MPI_COMM_WORLD);
 
   nextHost = (my_id+1)%nproc;
@@ -185,36 +205,44 @@ int main(int argc, char** argv) {
     MPI_Finalize();
   }
 
+  printf("Sync level: %d\n", temp);
+  MPI_Barrier(MPI_COMM_WORLD);
   sleep(1);
   if(debug){
-    printf("%d: Starting, PID: %d\n",my_id, getpid());
+    printf("Starting thread : %d\n",my_id);
   };
 
   if(my_id == STARTING_HOST){
-    // sending PING
-    sendToken(ping,PING_MODE);
+    // Sending PING
+    if(!(run_mode == 1)){
+      sendToken(ping,PING_MODE);
+    }
+    if(!(run_mode == 2)){
     // Sending PONG
-    sendToken(pong,PONG_MODE);
+      sendToken(pong,PONG_MODE);
+    }
   }
 
   while(1){
-    pthread_mutex_lock(&wait_mutex);
-    while(!critical_section){
-      pthread_cond_wait(&wait_conditional,&wait_mutex);
-    }
-
-    if(debug){
+    
+      pthread_mutex_lock(&wait_mutex);
+      while(!critical_section){
+        pthread_cond_wait(&wait_conditional,&wait_mutex);
+      }
+      if(debug){
       printf("Thread %d entered critical section\n",my_id);
-    }
-    sleep(1);
-    if(debug){
-      printf("Thread %d left critical section\n",my_id);
-    }
+      }
+      sleep(2);
+      if(debug){
+        printf("Thread %d left critical section\n",my_id);
+      }
 
-    pthread_mutex_lock(&main_mutex);
-    critical_section = 0;
-    pthread_mutex_unlock(&main_mutex);
-    pthread_mutex_unlock(&wait_mutex);
+      pthread_mutex_lock(&main_mutex);
+      critical_section = 0;
+      sendToken(ping,PING_MODE);
+      pthread_mutex_unlock(&main_mutex);
+      pthread_mutex_unlock(&wait_mutex);
+    
   }
 
   pthread_join(thread, NULL);

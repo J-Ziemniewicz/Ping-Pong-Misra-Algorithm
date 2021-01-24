@@ -7,7 +7,7 @@ build:
 	mpicc ping_pong.c -o main -pthread
 
 run:
-	mpirun -n 4 ./main -d
+	 mpirun -n 4 ./main -d -t ping
 
 publish:
 	git add ping_pong.c makefile README.md
