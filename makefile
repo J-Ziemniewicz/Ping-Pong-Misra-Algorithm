@@ -4,10 +4,10 @@ get:
 	git pull origin main
 
 build:
-	mpicc ping_pong.c -o main
+	mpicc ping_pong.c -o main -pthread
 
 run:
-	mpirun -n 4 ./main 
+	mpirun -n 4 ./main -d
 
 publish:
 	git add ping_pong.c makefile README.md

@@ -1,12 +1,3 @@
-
-// Author: Wes Kendall
-// Copyright 2011 www.mpitutorial.com
-// This code is provided freely with the tutorials on mpitutorial.com. Feel
-// free to modify it for your own use. Any distribution of the code must
-// either provide a link to www.mpitutorial.com or keep this header intact.
-//
-// Example using MPI_Send and MPI_Recv to pass a message around in a ring.
-//
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,9 +7,11 @@
 
 #define PING_MODE 1
 #define PONG_MODE 2
-#define DEBUG true
+#define DEBUG 1
 #define MSG_SIZE 1
 #define STARTING_HOST 0
+#define PING_DELAY 500
+#define PONG_DELAY 800
 
 int debug = 0;
 
@@ -30,13 +23,11 @@ int my_id = 1;
 int nproc;
 int nextHost;
 
-bool critical_section = false;
+int critical_section = 0;
 
 pthread_mutex_t main_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t wait_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t wait_conditional = PTHREAD_COND_INITIALIZER;
-
-
 
 
 
@@ -58,17 +49,19 @@ void sendToken(int val, int type){
     if(debug){
         printf("Sending PING: %d",val);
     }
+    usleep(PING_DELAY);
     MPI_Send(&val, MSG_SIZE, MPI_INT, nextHost, PING_MODE, MPI_COMM_WORLD);
   }
   else if(type == PONG_MODE){
     if(debug){
         printf("Sending PONG: %d",val);
     }
+    usleep(PONG_DELAY);
     MPI_Send(&val, MSG_SIZE, MPI_INT, nextHost, PONG_MODE, MPI_COMM_WORLD);
   }
 }
 
-// TODO: Write handling incoming message (with mutex)
+
 void *receive_thread()
 {
     printf("%d: Zaczynam wątek odbierający\n", my_id);
@@ -76,14 +69,14 @@ void *receive_thread()
    
     while (1)
     {
-      int msg[MSG_SIZE];
+      int msg;
       MPI_Status status;
-      int MSG_SIZE;      
+      int size;      
       MPI_Recv(&msg, MSG_SIZE, MPI_INT,MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD,&status);
       MPI_Get_count( &status, MPI_INT, &size);
       
       if(status.MPI_TAG == PING_MODE){
-        if(!(msg < abs(m))){
+        if(!(abs(msg) < abs(m))){
           if(debug){
             printf("[Thread %d] PING received: %d\n",my_id,msg);
           }
@@ -96,9 +89,7 @@ void *receive_thread()
             sendToken(pong,PONG_MODE);
           }
           else {
-            if (m < msg){
-              regenerate(msg);
-            }
+            critical_section = 1;
           }
           pthread_mutex_unlock(&main_mutex);
         }
@@ -109,7 +100,7 @@ void *receive_thread()
         }  
       }
       else if(status.MPI_TAG == PONG_MODE){
-        if(!(msg < abs(m))){
+        if(!(abs(msg) < abs(m))){
           if(debug){
             printf("[Thread %d] PONG received: %d\n",my_id,msg);
           }
@@ -117,6 +108,10 @@ void *receive_thread()
           // PING and PONG meets
           if(critical_section){
             incarnate(msg);
+            if(debug){
+              printf("[Thread %d] Incarnation: %d\n",my_id,ping);
+            }
+            sendToken(pong,PONG_MODE);
           }
           else if(m == msg){
             regenerate(msg);
@@ -125,12 +120,8 @@ void *receive_thread()
             }
             sendToken(ping,PING_MODE);
           }
-          else {
-            if (m < msg){
-              regenerate(msg);
-            }
-          }
           pthread_mutex_unlock(&main_mutex);
+          pthread_cond_signal(&wait_conditional);
         }
         else {
           if(debug){
@@ -188,7 +179,7 @@ int main(int argc, char** argv) {
   nextHost = (my_id+1)%nproc;
 
   pthread_t thread;
-  rc = pthread_create(&thread, NULL, receive_thread, NULL);
+  int rc = pthread_create(&thread, NULL, receive_thread, NULL);
   if(rc){
     fprintf(stderr,"Receiving thread failed to start...\nExiting...\n");
     MPI_Finalize();
@@ -221,7 +212,7 @@ int main(int argc, char** argv) {
     }
 
     pthread_mutex_lock(&main_mutex);
-    critical_section = false;
+    critical_section = 0;
     pthread_mutex_unlock(&main_mutex);
     pthread_mutex_unlock(&wait_mutex);
   }
