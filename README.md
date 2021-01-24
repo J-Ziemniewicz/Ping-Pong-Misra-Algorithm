@@ -41,7 +41,7 @@ run:
 ```
 
 ## Function description
-Function Regenerate is not used in implementation, because when one of the tokens is lost and is regenerate, than host holds both of PING and PONG tokens, which should invoke incarnation function. Instead of using regenerate and later incrementing regenerated tokens values we use incarnation function to regenerate and increment tokens.
+Function Regenerate is not used in implementation, because when one of the tokens is lost and is regenerate, than host holds both of PING and PONG tokens, which should invoke incarnation function. Instead of using regenerate and later incrementing regenerated tokens values, we use incarnation function to regenerate and increment tokens.
 
 ### Regenerate
 
